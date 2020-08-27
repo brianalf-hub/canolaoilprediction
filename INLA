@@ -1,0 +1,70 @@
+#lipids INLA and mapping
+
+####
+#
+rm(list=ls(all=TRUE)) #Clears previous work in R
+
+
+#install.packages("INLA", repos=c(getOption("repos"), INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
+
+# You will need a gridded polygon shapefile file and the following R packages:
+library(maptools)
+library(spdep)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(plyr)
+library(rgdal)
+library(rgeos)
+library(scales)
+
+library(lme4)
+library(car)
+library(nlme)
+library(lattice)
+library(MuMIn)
+library(visreg)
+library(multcomp)
+library(Hmisc)
+library(piecewiseSEM)
+library(INLA)
+library(ggmap)
+library(sp)
+library(viridis)
+library(caret)
+
+
+# START
+# SEt working directory to where your shapefiles are located
+setwd("G:/RCodes/canolaoil")
+
+# Sets the CRS to WGS84 if it's not already set.
+P4S.latlon <- CRS("+proj=longlat +datum=WGS84")
+
+# Read in the gridded shape file with all the raster data joined to the grid.
+oil_map <- readOGR("G:/RCodes/canolaoil/worldlipidsdata.shp")
+
+oil_map
+
+
+View(oil_map)
+
+oil_map$taxon2 <- as.factor(oil_map$taxon2)
+
+linolenic <- oil_map$linolenic
+bio1 <- oil_map$bio1
+bio4 <- oil_map$bio4
+bio8 <- oil_map$bio8
+bio12 <- oil_map$bio12
+bio15 <- oil_map$bio15
+bio16 <- oil_map$bio16
+
+# PCA for oil variables
+
+oil.pca <- prcomp(~ behenic + brassic + eicosadien + erucic + goindoic + 
+                    linoleic + linolenic + nervonic + arachidic + oleic + 
+                    palmitic + stearic, center=TRUE, scale=TRUE, data=oil_map)
+summary(oil.pca)
+loadings(oil.pca)
+head(oil.pca$scores)
+oil.pca
