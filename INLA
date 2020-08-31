@@ -1,7 +1,8 @@
 #lipids INLA and mapping
 
-####
-#
+
+################################################################################
+################################################################################
 rm(list=ls(all=TRUE)) #Clears previous work in R
 
 
@@ -12,12 +13,11 @@ library(maptools)
 library(spdep)
 library(ggplot2)
 library(RColorBrewer)
-library(dplyr)
 library(plyr)
+library(dplyr)
 library(rgdal)
 library(rgeos)
 library(scales)
-
 library(lme4)
 library(car)
 library(nlme)
@@ -28,11 +28,15 @@ library(multcomp)
 library(Hmisc)
 library(piecewiseSEM)
 library(INLA)
-library(ggmap)
 library(sp)
 library(viridis)
 library(caret)
+library(raster)
+library(spatialreg)
 
+
+################################################################################
+################################################################################
 
 # START
 # SEt working directory to where your shapefiles are located
@@ -51,7 +55,7 @@ View(oil_map)
 
 oil_map$taxon2 <- as.factor(oil_map$taxon2)
 
-linolenic <- oil_map$linolenic
+erucic <- oil_map$erucic
 bio1 <- oil_map$bio1
 bio4 <- oil_map$bio4
 bio8 <- oil_map$bio8
@@ -59,12 +63,232 @@ bio12 <- oil_map$bio12
 bio15 <- oil_map$bio15
 bio16 <- oil_map$bio16
 
-# PCA for oil variables
+data.frame(oil_map)
+na.omit(oil_map)
 
-oil.pca <- prcomp(~ behenic + brassic + eicosadien + erucic + goindoic + 
-                    linoleic + linolenic + nervonic + arachidic + oleic + 
-                    palmitic + stearic, center=TRUE, scale=TRUE, data=oil_map)
-summary(oil.pca)
-loadings(oil.pca)
-head(oil.pca$scores)
-oil.pca
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+# INLA start - prep work
+
+
+
+#BIO1 = Annual Mean Temperature
+#BIO2 = Mean Diurnal Range (Mean of monthly (max temp - min temp))
+#BIO3 = Isothermality (BIO2/BIO7) (×100)
+#BIO4 = Temperature Seasonality (standard deviation ×100)
+#BIO5 = Max Temperature of Warmest Month
+#BIO6 = Min Temperature of Coldest Month
+#BIO7 = Temperature Annual Range (BIO5-BIO6)
+#BIO8 = Mean Temperature of Wettest Quarter
+#BIO9 = Mean Temperature of Driest Quarter
+#BIO10 = Mean Temperature of Warmest Quarter
+#BIO11 = Mean Temperature of Coldest Quarter
+#BIO12 = Annual Precipitation
+#BIO13 = Precipitation of Wettest Month
+#BIO14 = Precipitation of Driest Month
+#BIO15 = Precipitation Seasonality (Coefficient of Variation)
+#BIO16 = Precipitation of Wettest Quarter
+#BIO17 = Precipitation of Driest Quarter
+#BIO18 = Precipitation of Warmest Quarter
+#BIO19 = Precipitation of Coldest Quarter
+
+
+# This creates the neighborhood map of the polygons
+nb <- poly2nb(oil_map,queen=TRUE)
+# This wrangles the neighborhood map in matrix that INLA can read. There are many choices for style = .
+adj <- nb2mat(nb, style = "B",zero.policy=TRUE)
+adj <- as(adj, "dgTMatrix")
+
+list_of_nbs <- nb2listw(nb, style="B",zero.policy=TRUE)
+
+#build the full model (fm)pe
+#Spatial model selection for each oil ty
+
+#############################################################################
+
+#Semi-parametric spatial filtering
+# For this step, I made spatially filtered models and tested them against
+# regulat linear models to see if there is a statistical difference between 
+# the spatial filtering and no spatial filtering. 
+# The filtering method works by rotating the dataset (a-la PCA) until it finds
+# an axis that has very little spatial autocorrelation (Moran's I)
+# I include several model hypotheses that I will test later using model
+# selection
+
+# fullmodel
+
+todos.SFE <- SpatialFiltering(erucic~  bio1 + bio4 + bio8 + bio12  + bio15 + bio16,
+                               nb = nb, verbose = FALSE, zero.policy=TRUE, 
+                               symmetric = TRUE, ExactEV = TRUE)
+todos.SFE
+
+todos.SF <- lm(erucic ~ 
+                    bio1 + bio4 + bio8 + bio12 + bio15 + bio16 +
+                    fitted(todos.SFE),data=oil_map)
+todos.lm <- lm(erucic ~ 
+                   bio1 + bio4 + bio8 + bio12 + bio15 + bio16, data=oil_map)
+anova(todos.full.SF, todos.full.lm)
+
+#===============================================================================
+#temperature model
+temp.SFE <- SpatialFiltering(erucic~ 
+                                bio1 + bio4 + bio8,
+                              nb = nb, verbose = FALSE, zero.policy=TRUE, 
+                              symmetric = TRUE, ExactEV = TRUE)
+temp.SFE
+
+temp.sf <- lm(erucic~ 
+                   bio1 + bio4 + bio8 + 
+                   fitted(temp.SFE), data=oil_map)
+temp.lm <- lm(erucic~ 
+                bio1 + bio4 + bio8, data=oil_map)
+anova(temp.sf, temp.lm)
+
+#===============================================================================
+#precip model
+precip.SFE <- SpatialFiltering(erucic~ 
+                                 bio12 + bio15 + bio16,
+                             nb = nb, verbose = FALSE, zero.policy=TRUE, 
+                             symmetric = TRUE, ExactEV = TRUE)
+precip.SFE
+
+precip.sf <- lm(erucic~ 
+                  bio12 + bio15 + bio16 +
+                  fitted(precip.SFE), data=oil_map)
+
+precip.lm <- lm(erucic~ 
+                  bio12 + bio15 + bio16, data=oil_map)
+
+anova(precip.lm, precip.sf)
+
+#===============================================================================
+
+
+null <- lm(erucic~1, data=oil_map)
+
+
+#===============================================================================
+# After selecting the spatially filtered and/or regular models to use, 
+
+
+modsel.erucic <- model.sel(todos.full, temp, precip, null,  rank=AICc)
+modsel.erucic 
+
+summary(modsel.erucic)
+
+
+# coerce the object out.put into a data frame
+# elements 6-10 in out.put have what we want
+oil.table<-as.data.frame(modsel.erucic)[11:15]
+oil.table
+
+# a little clean-up, lets round things a bit
+oil.table[,2:3]<- round(oil.table[,2:3],2)
+oil.table[,4:5]<- round(oil.table[,4:5],3)
+# that's better 
+
+# how about a little renaming columns to fit proper conventions
+# number of parameters (df) should be K
+names(oil.table)[1] = "K"
+
+## lets be sure to put the model names in a column
+oil.table$Model<-rownames(oil.table)
+
+for(i in 1:nrow(oil.table)) oil.table$Model[i]<- as.character(formula(paste(oil.table$Model[i])))[3] 
+
+# let's see what is in there
+oil.table
+
+#little reordering of columns
+oil.table<-oil.table[,c(6,1,2,3,4,5)]
+oil.table
+
+write.csv(oil.table,"oil.table.csv", row.names = F) 
+
+rsq(rgr.glm)
+rsq(phenology.glm)
+rsq(reprate.glm)
+rsq(leaf.glm)
+rsq(lma.glm)
+rsq(totalbranches.glm)
+rsq(biomass.glm)
+##########################################################################################################################################
+
+# This is just grabbing ID numbers for the rows to match up the data.
+oil_map$idx <- 1:nrow(oil_map)
+
+
+# Bayesian modeling
+# This looks like any standard lm/glm model with the exception of f. f is the function for handling
+# smoothing or in our case the spatial terms. The model besag is designed for spatial data. There
+# is also besagproper, besag2, and bym. See http://www.r-inla.org/models/latent-models for more details.
+# The default prior is a logguassian, so it might be worth exploring other priors depending on your data
+# or Bayesian philosophy. 
+
+form <- erucic~  bio1 + bio4 + bio8 + 
+  f(idx, model = "besag2", graph = adj, hyper = list(theta=list(prior="gaussian",param=c(.5, .005))) )
+
+
+# Shapefile to dataframe
+trdf <- as.data.frame(oil_map)
+summary(trdf)
+
+# This is the main model. 
+# names(inla.models()$likelihood)
+
+m1 <- inla(form, data = trdf, family="gaussian", control.predictor=list(link=1,compute=TRUE),
+           control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE),
+           control.inla = list(print.joint.hyper = TRUE),
+           num.threads=6)
+
+
+# Prints out the summary. Since we are in a Bayesian framework you will see mean values for the 
+# model parameters
+summary(m1) 
+
+dev.off()
+# This dumps out several summary plots of the models posterior density.
+plot(m1)
+
+saveRDS(m1, "model.m1")
+
+read.Model <- readRDS("model.m1")
+
+
+#Predicted map
+oil_map$INLA_car_Prediction=m1$summary.fitted.values$mean
+oil_map@data$id = rownames(oil_map@data)
+oil_inla.df <- fortify(oil_map, region="id")
+oil_map_inla = join(oil_inla.df, oil_map@data, by="id")
+oil_inla.df$id <-as.numeric(oil_inla.df$id)
+
+
+colnames(oil_map_inla) <- make.unique(names(oil_map_inla))
+std_resids_map <- ggplot(oil_map_inla) + 
+  aes(long,lat,group=group, fill=INLA_car_Prediction) + 
+  geom_polygon() +
+  coord_equal() + scale_fill_viridis(name="Standardized residuals of \n temperature seasonality (Bio4) \n versus percent canola oil ",  
+                                      breaks = pretty_breaks(n = 7),direction = 1) +
+  theme_bw() +
+  theme(
+    plot.background = element_blank()
+    #,panel.grid.major = element_blank()
+    ,panel.grid.minor = element_blank()
+    ,panel.background = element_blank()
+    ,panel.border = element_blank()
+    ,axis.title.x = element_blank(),
+    axis.text.x  = element_text(vjust=0.5, size=12)
+    ,axis.title.y = element_blank(),
+    axis.text.y  = element_text(size=12)
+    ,legend.title=element_blank()
+    ,legend.text = element_text(color = "blue", size = 12)
+  )
+dev.off()
+std_resids_map + geom_polygon(data=oil_map_inla , aes(x=long, y=lat, group=group), size=0.25 ,fill="NA",color="black")
+
+###
+
+
+
