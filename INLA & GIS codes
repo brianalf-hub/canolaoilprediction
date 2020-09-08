@@ -287,8 +287,3 @@ std_resids_map <- ggplot(oil_map_inla) +
   )
 dev.off()
 std_resids_map + geom_polygon(data=oil_map_inla , aes(x=long, y=lat, group=group), size=0.25 ,fill="NA",color="black")
-
-###
-
-
-
